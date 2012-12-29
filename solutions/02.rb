@@ -1,45 +1,56 @@
 class Song
   attr_accessor :name, :artist, :album
 
-  def initialize(song_description)
-    @name   = song_description[0]
-    @artist = song_description[1]
-    @album  = song_description[2]
+  def initialize(name, artist, album)
+    @name   = name
+    @artist = artist
+    @album  = album
   end
 
   def ==(other)
-    @name == other.name and @artist == other.artist and @album == other.album
+    @name == other.name and
+      @artist == other.artist and
+      @album == other.album
+  end
+
+  alias eql? ==
+
+  def hash
+    [@name, @artist, @album].hash
   end
 end
 
 class Collection
+  attr_reader :songs
   include Enumerable
 
   def initialize(songs)
     @songs = songs
   end
 
-  def each
-    @songs.each { |song| yield song }
+  def each(&block)
+    @songs.each(&block)
   end
 
   def self.parse(text)
-    songs = text.split("\n").each_slice(4).map do |song_description|
-      Song.new(song_description)
+    lines = text.split("\n")
+    songs = lines.each_slice(4).map do |name, artist, album|
+      Song.new name, artist, album
     end
-    new(songs)
+
+    new songs
   end
 
   def artists
-    @songs.map { |song| song.artist }.uniq
+    @songs.map(&:artist).uniq
   end
 
   def albums
-    @songs.map { |song| song.album }.uniq
+    @songs.map(&:album).uniq
   end
 
   def names
-    @songs.map { |song| song.name }.uniq
+    @songs.map(&:name).uniq
   end
 
   def filter(criteria)
@@ -47,11 +58,9 @@ class Collection
     Collection.new(sub_songs)
   end
 
-  def adjoin(other_songs)
-    subset = Array.new(@songs.to_a)
-    filtered_songs = other_songs.select { |song| not subset.member? song }
-    filtered_songs.each { |song| subset << song }
-    Collection.new(subset)
+  def adjoin(other)
+    adjoined_songs = (@songs + other.songs).uniq
+    Collection.new adjoined_songs
   end
 end
 
