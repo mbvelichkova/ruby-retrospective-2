@@ -1,12 +1,19 @@
+module RegularExpressions
+  HOSTNAME      = /(?<hostname>([0-9a-zA-Z][0-9a-zA-Z-]{,61}(?<!\-)\.)+([a-zA-Z]{2,3}(\.[a-zA-Z]{2})?))/
+  USERNAME      = /(?<username>([0-9a-zA-Z][\w\+\.-]{,200}))/
+  EMAIL         = /\b#{USERNAME}@#{HOSTNAME}\b/
+  COUNTRY_CODE  = /(?<country_code>(\+|00)[1-9]\d{,2})/
+  PHONE         = /((\b|(?<![\+\w]))(0[^0]|#{COUNTRY_CODE}))([ \-\(\)]{,2}(\d[ \-\(\)]{,2}){6,10}\d)/
+  INTEGER       = /-?(0|[1-9]\d*)/
+  NUMBER        = /-?((0(\.\d+)?)|[1-9]\d*(\.\d+)?)/
+  IP_ADDRESS     = /(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).\g<1>.\g<1>.\g<1>/
+  DATE          = /(\d{4})-(0[1-9]|1[012])-(0[1-9]|[12][0-9]|3[01])/
+  TIME          = /(([01][0-9])|(2[0-3])):[0-5][0-9]:[0-5][0-9]/
+end
+
 class PrivacyFilter
   attr_accessor :preserve_phone_country_code, :preserve_email_hostname, :partially_preserve_email_username
-
-  HOSTNAME_REGULAR_EXPRESSION = /(?<host>([0-9a-zA-Z][0-9a-zA-Z-]{,61}[0-9a-zA-Z]\.)+([a-zA-Z]{2,3}(\.[a-zA-Z]{2})?))/
-  EMAIL_REGULAR_EXPRESSION = /([0-9a-zA-Z][\w\+\.-]{,200})@#{HOSTNAME_REGULAR_EXPRESSION}/
-  EMAIL_PARTITIONAL_USERNAME = /([0-9a-zA-Z][\w\+\.-]{2})([\w\+\.-]{,200})@/
-  PHONE_REGULAR_EXPRESSION = /(0|((\+\d{3})|(00\d)))(?<spliter>( |-|\(|\)){,2})(\d\g<spliter>){5,10}\d/
-  PHONE_COUNTRY_CODE_REGULAR_EXPRESSION = /((\+\d{3})|(00\d))(?<spliter>( |-|\(|\)){,2})(\d\g<spliter>){5,10}\d/
-  PHONE_LOCAL_CODE_REGULAR_EXPRESSION = /0(?<spliter>( |-|\(|\)){,2})(\d\g<spliter>){5,10}\d/
+  include RegularExpressions
 
   def initialize(text)
     @preserve_phone_country_code, @preserve_email_hostname, @partially_preserve_email_username = false, false, false
@@ -14,82 +21,76 @@ class PrivacyFilter
   end
 
   def filtered
-    filtered_emails
-    filtered_phones
-    @text
+    result = filter_phones(@text)
+    filter_emails(result)
   end
 
-  private
-
-  def filter_email
-    @text.gsub!(EMAIL_REGULAR_EXPRESSION, '[EMAIL]')
+  def filter_emails(text)
+    if partially_preserve_email_username
+      text.gsub(EMAIL) { |string| "#{filter_username($~[:username])}@#{$~[:hostname]}" }
+    elsif preserve_email_hostname
+      text.gsub(EMAIL, '[FILTERED]@\k<hostname>')
+    else
+      text.gsub(EMAIL, '[EMAIL]')
+    end
   end
 
-  def filter_username
-    @text.gsub!(EMAIL_REGULAR_EXPRESSION, '[FILTERED]@\k<host>')
+  def filter_username(username)
+    if username.length >= 6
+      username[0..2] + '[FILTERED]'
+    else
+      '[FILTERED]'
+    end
   end
 
-  def filter_partitional_username
-    @text.gsub!(EMAIL_REGULAR_EXPRESSION) { |email| email.gsub(EMAIL_PARTITIONAL_USERNAME, '\1[FILTERED]@') }
-  end
-
-  def filter_phone
-    @text.gsub!(PHONE_REGULAR_EXPRESSION, '[PHONE]')
-  end
-
-  def filter_phone_id
-    @text.gsub!(PHONE_COUNTRY_CODE_REGULAR_EXPRESSION) { |phone| phone[0..3]+' [FILTERED]' }
-    @text.gsub!(PHONE_LOCAL_CODE_REGULAR_EXPRESSION, '[PHONE]')
-  end
-
-  def filtered_emails
-    filter_username if preserve_email_hostname
-    filter_partitional_username if partially_preserve_email_username
-    filter_email if preserve_email_hostname == false and partially_preserve_email_username == false
-  end
-
-  def filtered_phones
-    filter_phone if @preserve_phone_country_code == false
-    filter_phone_id if @preserve_phone_country_code
+  def filter_phones(text)
+    text.gsub(PHONE) do
+      if preserve_phone_country_code and $~[:country_code].to_s != ''
+        "#{$~[:country_code]} [FILTERED]"
+      else
+        '[PHONE]'
+      end
+    end
   end
 end
 
 class Validations
-  HOSTNAME_REGULAR_EXPRESSION = /([0-9a-zA-Z][0-9a-zA-Z-]{,61}[0-9a-zA-Z]\.)+([a-zA-Z]{2,3}(\.[a-zA-Z][a-zA-Z])?)/
+  include RegularExpressions
+
   def self.email?(value)
-    /\A[0-9a-zA-Z][\w\+\.-]{,200}@#{HOSTNAME_REGULAR_EXPRESSION}\z/.match(value) ? true : false
+    /\A#{EMAIL}\z/.match(value) ? true : false
   end
 
   def self.phone?(value)
-    /\A(0|((\+\d{3})|(00\d)))(?<spliter>( |-|\(|\)){,2})(\d\g<spliter>){5,10}\d\z/.match(value) ? true : false
+    /\A#{PHONE}\z/.match(value) ? true : false
   end
 
   def self.hostname?(value)
-    /\A([0-9a-zA-Z][0-9a-zA-Z-]{,61}[0-9a-zA-Z]\.)+([a-zA-Z]{2,3}(\.[a-zA-Z][a-zA-Z])?)\z/.match(value) ? true : false
+    /\A#{HOSTNAME}\z/.match(value) ? true : false
   end
 
   def self.ip_address?(value)
-    /\A(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).\g<1>.\g<1>.\g<1>\z/.match(value) ? true : false
+    /\A#{IP_ADDRESS}\z/.match(value) ? true : false
   end
 
   def self.number?(value)
-    /\A-?(0|[1-9])\d*(\d*|(.?\d+))\z/.match(value) ? true : false
+    /\A#{NUMBER}\z/.match(value) ? true : false
   end
 
   def self.integer?(value)
-    /\A-?\d+\z/.match(value) ? true : false
+    /\A#{INTEGER}\z/.match(value) ? true : false
   end
 
   def self.date?(value)
-    /\A(\d{4})-(0[1-9]|1[012])-(0[1-9]|[12][0-9]|3[01])\z/.match(value) ? true : false
+    /\A#{DATE}\z/.match(value) ? true : false
   end
 
   def self.time?(value)
-    /\A(([01][0-9])|(2[0-3])):[0-5][0-9]:[0-5][0-9]\z/.match(value) ? true : false
+    /\A#{TIME}\z/.match(value) ? true : false
   end
 
   def self.date_time?(value)
-    /\A(\d{4})-(\d{2})-(\d{2})( |T)(([01][0-9])|(2[0-3])):[0-5][0-9]:[0-5][0-9]\z/.match(value) ? true : false
+    /\A#{DATE}( |T)#{TIME}\z/.match(value) ? true : false
   end
 end
 
